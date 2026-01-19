@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from models.chat import ChatRequest, ChatResponse, DocumentInfo
 from services.rag_service import rag_service
@@ -9,44 +10,59 @@ from datetime import datetime
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
-@router.post("/upload", response_model=DocumentInfo)
-async def upload_document(
-    file: UploadFile = File(...),
+@router.post("/upload", response_model=List[DocumentInfo])
+async def upload_documents(
+    files: List[UploadFile] = File(...),
     user_id: str = Depends(verify_token)
 ):
-    """Upload PDF and process it"""
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files allowed")
+    """Upload Multiple PDFs and process them"""
     
-    # Save temporarily
-    temp_path = f"temp_{user_id}_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # 1. Clear old memory (Start fresh for this session)
+    rag_service.clear_memory()
+    
+    uploaded_docs = []
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    # 2. Process each file
+    for file in files:
+        if not file.filename.endswith(".pdf"):
+            continue # Skip non-pdfs
         
-    try:
-        # Process PDF
-        num_chunks = await rag_service.process_pdf(temp_path, user_id)
-        
-        # Save to database
-        doc_info = {
-            "user_id": user_id,
-            "filename": file.filename,
-            "chunks": num_chunks,
-            "uploaded_at": datetime.utcnow()
-        }
-        await documents_collection.insert_one(doc_info)
-        
-        # Cleanup
-        os.remove(temp_path)
-        
-        return DocumentInfo(
-            filename=file.filename,
-            chunks=num_chunks
-        )
-    except Exception as e:
-        if os.path.exists(temp_path):
+        # Save temporarily
+        temp_path = f"temp_{user_id}_{file.filename}"
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        try:
+            # Process PDF (Add to DB)
+            num_chunks = await rag_service.process_file(temp_path, user_id)
+            
+            # Save metadata to MongoDB
+            doc_info = {
+                "user_id": user_id,
+                "filename": file.filename,
+                "chunks": num_chunks,
+                "uploaded_at": datetime.utcnow()
+            }
+            await documents_collection.insert_one(doc_info)
+            
+            uploaded_docs.append(DocumentInfo(filename=file.filename, chunks=num_chunks))
+            
+            # Cleanup temp file
             os.remove(temp_path)
-        raise HTTPException(status_code=500, detail=str(e))
+            
+        except Exception as e:
+            # If a file fails, try to clean up and log it, but continue if possible
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            print(f"Error processing {file.filename}: {e}")
+            
+    if not uploaded_docs:
+        raise HTTPException(status_code=400, detail="No valid PDF files were processed successfully.")
+        
+    return uploaded_docs
 
 @router.post("/message", response_model=ChatResponse)
 async def chat_message(
@@ -73,7 +89,6 @@ async def chat_message(
 
 @router.get("/history")
 async def get_chat_history(user_id: str = Depends(verify_token)):
-    """Get chat history"""
     messages = await chat_messages_collection.find(
         {"user_id": user_id}
     ).sort("timestamp", -1).limit(50).to_list(50)
@@ -87,7 +102,6 @@ async def get_chat_history(user_id: str = Depends(verify_token)):
 
 @router.get("/documents")
 async def get_documents(user_id: str = Depends(verify_token)):
-    """Get uploaded documents"""
     docs = await documents_collection.find(
         {"user_id": user_id}
     ).sort("uploaded_at", -1).to_list(100)
@@ -100,6 +114,5 @@ async def get_documents(user_id: str = Depends(verify_token)):
 
 @router.delete("/clear")
 async def clear_history(user_id: str = Depends(verify_token)):
-    """Clear chat history"""
-    result = await chat_messages_collection.delete_many({"user_id": user_id})
-    return {"deleted": result.deleted_count}
+    await chat_messages_collection.delete_many({"user_id": user_id})
+    return {"deleted": "History cleared"}
