@@ -39,3 +39,5 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         return user_id
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
