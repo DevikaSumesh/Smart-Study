@@ -23,8 +23,8 @@ async def test_connection():
     """Test MongoDB connection"""
     try:
         await client.admin.command('ping')
-        print("✅ MongoDB connection successful!")
+        print(" MongoDB connection successful!")
         return True
     except Exception as e:
-        print(f"❌ MongoDB connection failed: {e}")
+        print(f" MongoDB connection failed: {e}")
         return False
