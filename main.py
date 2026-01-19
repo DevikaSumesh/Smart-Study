@@ -1,18 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import auth, chat
+from routes import auth, chat, study
 from database import test_connection
 
 app = FastAPI(
-    title="SmartStudy RAG Chatbot API",
-    description="AI-Powered Study Assistant with RAG",
-    version="1.0.0"
+    title="SmartStudy AI Copilot",
+    description="RAG Chatbot + Flashcards + Study Resources",
+    version="2.0.0"
 )
 
 # CORS - Allow frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific URL in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,16 +21,17 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(study.router)
 
 @app.on_event("startup")
 async def startup_event():
-    print("🚀 Starting SmartStudy API...")
+    print("🚀 Starting SmartStudy V2...")
     await test_connection()
 
 @app.get("/")
 async def root():
     return {
-        "message": "SmartStudy RAG Chatbot API",
+        "message": "SmartStudy RAG Chatbot API V2",
         "status": "running",
         "docs": "/docs"
     }
